@@ -19,6 +19,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85bb70cc08ec97ca5450e6eba421deeea5f172c0fc61f78b5357b2a8e8be195f"
+
+[[package]]
 name = "async-dnssd"
 version = "0.4.0"
 source = "git+https://github.com/stbuehler/rust-async-dnssd#15a7982d7edc6faa18f8e3cf90897a1e7df193c5"
@@ -576,6 +582,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "thiserror"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b13f926965ad00595dd129fa12823b04bbf866e9085ab0a5f2b05b850fbfc344"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "893582086c2f98cde18f906265a65b5030a074b1046c674ae898be6519a7f479"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "thread_local"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -611,14 +637,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "udplog"
+name = "ttr"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-dnssd",
  "env_logger",
  "futures",
  "log",
  "structopt",
+ "thiserror",
  "tokio",
  "uuid",
 ]

@@ -1,12 +1,24 @@
-use std::{env, error::Error as StdError, time::Duration};
+use std::{error::Error as StdError, net::SocketAddr, time::Duration};
 
-use async_dnssd::{RegisterData, Registration, ResolvedHostFlags, StreamTimeoutExt, TxtRecord};
+use async_dnssd::{RegisterData, Registration, StreamTimeoutExt, TxtRecord};
 use futures::prelude::*;
 use log::*;
-use tokio::spawn;
+use structopt::StructOpt;
+use thiserror::Error;
+use tokio::net::TcpListener;
 use uuid::Uuid;
 
-async fn register(port: u16) -> Result<Registration, Box<dyn StdError>> {
+#[derive(Debug, StructOpt)]
+#[structopt(name = "ttr", about = "Ticket to ride app man in the middle server")]
+struct Opt {
+    /// Hostname to bind to
+    #[structopt(short = "H", long, default_value = "127.0.0.1")]
+    host: String,
+}
+
+const MDNS_TYPE: &'static str = "_t2rdaysofwonder._tcp";
+
+async fn register(port: u16) -> anyhow::Result<Registration> {
     let uuid = Uuid::new_v4().to_hyphenated().to_string();
     let mut record = TxtRecord::new();
     record
@@ -25,8 +37,8 @@ async fn register(port: u16) -> Result<Registration, Box<dyn StdError>> {
         .set_value("_d".as_bytes(), "sean".as_bytes())
         .unwrap();
     let (registration, result) = async_dnssd::register_extended(
-        "_t2rdaysofwonder._tcp",
-        64444,
+        MDNS_TYPE,
+        port,
         RegisterData {
             txt: record.data(),
             ..Default::default()
@@ -37,13 +49,45 @@ async fn register(port: u16) -> Result<Registration, Box<dyn StdError>> {
     Ok(registration)
 }
 
+async fn find_server() -> anyhow::Result<SocketAddr> {
+    let browse = async_dnssd::browse(MDNS_TYPE)?.timeout(Duration::from_secs(3))?;
+    let val = browse
+        .map(|service| async move {
+            debug!("Found service: {:?}", service);
+            service
+        })
+        .buffer_unordered(16)
+        .next()
+        .await;
+    debug!("val: {:?}", val);
+    Err(FindError::NoServerFound.into())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
-    env_logger::init();
+    env_logger::builder()
+        .filter(Some("ttr"), LevelFilter::Debug)
+        .init();
 
-    let _registration = register(64444).await?;
+    let args = Opt::from_args();
+
+    let mut server = TcpListener::bind((args.host.as_str(), 0)).await?;
+    let addr = server.local_addr()?;
+    debug!("Tcp server bound to {:?}", addr);
+    let port = addr.port();
+
+    let remote_host = find_server().await?;
+
+    let _registration = register(port).await?;
 
     loop {
-        tokio::time::delay_for(Duration::from_secs(10)).await;
+        let (stream, addr) = server.accept().await?;
+        debug!("New connection from {:?}", addr);
     }
+}
+
+#[derive(Error, Debug)]
+enum FindError {
+    #[error("No ttr server found")]
+    NoServerFound,
 }
