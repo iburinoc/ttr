@@ -1,16 +1,12 @@
-use std::{env, time::Duration};
+use std::{env, error::Error as StdError, time::Duration};
 
-use async_dnssd::{RegisterData, ResolvedHostFlags, StreamTimeoutExt, TxtRecord};
+use async_dnssd::{RegisterData, Registration, ResolvedHostFlags, StreamTimeoutExt, TxtRecord};
 use futures::prelude::*;
+use log::*;
 use tokio::spawn;
 use uuid::Uuid;
 
-#[tokio::main(basic_scheduler)]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let search_timeout = Duration::from_secs(10);
-    let resolve_timeout = Duration::from_secs(3);
-    let address_timeout = Duration::from_secs(3);
-
+async fn register(port: u16) -> Result<Registration, Box<dyn StdError>> {
     let uuid = Uuid::new_v4().to_hyphenated().to_string();
     let mut record = TxtRecord::new();
     record
@@ -28,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     record
         .set_value("_d".as_bytes(), "sean".as_bytes())
         .unwrap();
-    let _register = async_dnssd::register_extended(
+    let (registration, result) = async_dnssd::register_extended(
         "_t2rdaysofwonder._tcp",
         64444,
         RegisterData {
@@ -37,6 +33,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?
     .await?;
+    debug!("Registered: {:?}", result);
+    Ok(registration)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn StdError>> {
+    env_logger::init();
+
+    let _registration = register(64444).await?;
 
     loop {
         tokio::time::delay_for(Duration::from_secs(10)).await;
