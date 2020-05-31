@@ -5,6 +5,8 @@ authors = ["Sean Purcell <me@seanp.xyz>"]
 edition = "2018"
 
 [dependencies]
-net2 = "0.2"
+async-dnssd = { git = "https://github.com/stbuehler/rust-async-dnssd" }
+futures = "0.3"
 structopt = "0.3"
 tokio = { version = "0.2", features = ["udp", "macros", "dns"] }
+uuid = { version = "0.8", features = ["v4"] }
