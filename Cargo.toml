@@ -1,0 +1,10 @@
+[package]
+name = "udplog"
+version = "0.1.0"
+authors = ["Sean Purcell <me@seanp.xyz>"]
+edition = "2018"
+
+[dependencies]
+net2 = "0.2"
+structopt = "0.3"
+tokio = { version = "0.2", features = ["udp", "macros", "dns"] }
