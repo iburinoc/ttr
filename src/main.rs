@@ -7,7 +7,10 @@ use futures::{pin_mut, prelude::*};
 use log::*;
 use structopt::StructOpt;
 use thiserror::Error;
-use tokio::net::TcpListener;
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+};
 use uuid::Uuid;
 
 #[derive(Debug, StructOpt)]
@@ -16,6 +19,10 @@ struct Opt {
     /// Hostname to bind to
     #[structopt(short = "H", long, default_value = "127.0.0.1")]
     host: String,
+
+    /// Port to bind to
+    #[structopt(short, long, default_value = "0")]
+    port: u16,
 }
 
 const MDNS_TYPE: &'static str = "_t2rdaysofwonder._tcp";
@@ -132,6 +139,43 @@ async fn find_server() -> anyhow::Result<(SocketAddr, HashMap<String, String>)> 
     }
 }
 
+async fn transfer(r: impl AsyncRead, w: impl AsyncWrite) {
+    let mut buf = vec![0u8; 65536];
+    pin_mut!(r);
+    pin_mut!(w);
+    loop {
+        let res = r.read(&mut buf).await;
+        let len = match res {
+            Ok(l) => l,
+            Err(e) => {
+                error!("Read error: {:?}", e);
+                return;
+            }
+        };
+        let res = w.write_all(&buf[0..len]).await;
+        match res {
+            Ok(()) => (),
+            Err(e) => {
+                error!("Write error: {:?}", e);
+                return;
+            }
+        }
+    }
+}
+
+async fn mitm_connection(host1: TcpStream, host2: TcpStream) {
+    let (read1, write1) = host1.into_split();
+    let (read2, write2) = host2.into_split();
+    future::join(transfer(read1, write2), transfer(read2, write1)).await;
+}
+
+async fn handle_stream(stream: TcpStream, remote_host: SocketAddr) -> anyhow::Result<()> {
+    let other = TcpStream::connect(remote_host).await?;
+    debug!("Connected to {:?}", remote_host);
+    mitm_connection(stream, other).await;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
     env_logger::builder()
@@ -140,7 +184,7 @@ async fn main() -> Result<(), Box<dyn StdError>> {
 
     let args = Opt::from_args();
 
-    let mut server = TcpListener::bind((args.host.as_str(), 0)).await?;
+    let mut server = TcpListener::bind((args.host.as_str(), args.port)).await?;
     let addr = server.local_addr()?;
     debug!("Tcp server bound to {:?}", addr);
     let port = addr.port();
@@ -155,9 +199,9 @@ async fn main() -> Result<(), Box<dyn StdError>> {
         let (stream, addr) = server.accept().await?;
         debug!("New connection from {:?}", addr);
         tokio::spawn(async move {
-            let _stream = stream;
-            loop {
-                tokio::time::delay_for(TIMEOUT).await;
+            match handle_stream(stream, remote_host).await {
+                Ok(()) => debug!("{:?} finished", addr),
+                Err(e) => error!("Error occurred for {:?}: {:?}", addr, e),
             }
         });
     }

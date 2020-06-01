@@ -12,5 +12,5 @@ futures = "0.3"
 log = "0.4"
 structopt = "0.3"
 thiserror = "1.0"
-tokio = { version = "0.2", features = ["tcp", "udp", "macros", "dns"] }
+tokio = { version = "0.2", features = ["full"] }
 uuid = { version = "0.8", features = ["v4"] }
