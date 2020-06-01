@@ -1,7 +1,9 @@
-use std::{error::Error as StdError, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, error::Error as StdError, net::SocketAddr, time::Duration};
 
-use async_dnssd::{RegisterData, Registration, StreamTimeoutExt, TxtRecord};
-use futures::prelude::*;
+use async_dnssd::{
+    BrowsedFlags, RegisterData, Registration, ResolvedHostFlags, StreamTimeoutExt, TxtRecord,
+};
+use futures::{pin_mut, prelude::*};
 use log::*;
 use structopt::StructOpt;
 use thiserror::Error;
@@ -17,25 +19,20 @@ struct Opt {
 }
 
 const MDNS_TYPE: &'static str = "_t2rdaysofwonder._tcp";
+static TIMEOUT: Duration = Duration::from_secs(1);
 
-async fn register(port: u16) -> anyhow::Result<Registration> {
-    let uuid = Uuid::new_v4().to_hyphenated().to_string();
-    let mut record = TxtRecord::new();
-    record
-        .set_value("gameStatus".as_bytes(), "1".as_bytes())
-        .unwrap();
-    record
-        .set_value("platform".as_bytes(), "generic".as_bytes())
-        .unwrap();
-    record
-        .set_value("uuid".as_bytes(), uuid.as_bytes())
-        .unwrap();
-    record
-        .set_value("version".as_bytes(), "2.7.6".as_bytes())
-        .unwrap();
-    record
-        .set_value("_d".as_bytes(), "sean".as_bytes())
-        .unwrap();
+async fn register(port: u16, kvs: HashMap<String, String>) -> anyhow::Result<Registration> {
+    let record = kvs
+        .iter()
+        .fold(TxtRecord::new(), |mut record, (key, value)| {
+            let value = if key == "_d" {
+                format!("{}mitm", value)
+            } else {
+                value.clone()
+            };
+            record.set_value(key.as_bytes(), value.as_bytes()).unwrap();
+            record
+        });
     let (registration, result) = async_dnssd::register_extended(
         MDNS_TYPE,
         port,
@@ -49,18 +46,90 @@ async fn register(port: u16) -> anyhow::Result<Registration> {
     Ok(registration)
 }
 
-async fn find_server() -> anyhow::Result<SocketAddr> {
+async fn find_server() -> anyhow::Result<(SocketAddr, HashMap<String, String>)> {
     let browse = async_dnssd::browse(MDNS_TYPE)?.timeout(Duration::from_secs(3))?;
-    let val = browse
-        .map(|service| async move {
-            debug!("Found service: {:?}", service);
-            service
+    let stream = browse
+        .map_err(anyhow::Error::new)
+        .try_filter_map(|service| async move {
+            let result: anyhow::Result<_> = async {
+                let added = service.flags.contains(BrowsedFlags::ADD);
+                if !added {
+                    return Ok(None);
+                }
+                debug!("Found service: {:?}", service);
+                let resolve = service
+                    .resolve()?
+                    .timeout(TIMEOUT)?
+                    .map_err(anyhow::Error::new);
+                let name = service.service_name.clone();
+                let res = resolve.try_filter_map(move |r| {
+                    let name = name.clone();
+                    async move {
+                        let txt = TxtRecord::parse(&r.txt)
+                            .map(|rdata| {
+                                rdata
+                                    .iter()
+                                    .filter_map(|(key, value)| {
+                                        let from_utf8 =
+                                            |x| String::from(String::from_utf8_lossy(x));
+                                        value.map(|v| (from_utf8(key), from_utf8(v)))
+                                    })
+                                    .collect::<HashMap<_, _>>()
+                            })
+                            .ok_or(FindError::DataParseError)?;
+                        let addr = Box::pin(
+                            r.resolve_socket_address()?
+                                .timeout(Duration::from_secs(1))?
+                                .map_err(anyhow::Error::new)
+                                .filter_map(|x| async {
+                                    match x {
+                                        Ok(x) => Some(x),
+                                        Err(e) => {
+                                            error!("Resolution error: {:?}", e);
+                                            None
+                                        }
+                                    }
+                                })
+                                .filter_map(|result| async {
+                                    if result.flags.intersects(ResolvedHostFlags::ADD) {
+                                        Some(result.address)
+                                    } else {
+                                        None
+                                    }
+                                }),
+                        )
+                        .next()
+                        .await
+                        .ok_or(FindError::NoResolutionFound)?;
+                        debug!(
+                            "Resolved {:?} on {:?}: {:?}:{}, txt: {:?}",
+                            name, r.interface, addr, r.port, txt
+                        );
+                        Ok(Some((addr.into(), txt)))
+                    }
+                });
+                Ok(Some(res))
+            }
+            .await;
+            result
         })
-        .buffer_unordered(16)
-        .next()
-        .await;
+        .try_flatten()
+        .filter_map(|x| async {
+            match x {
+                Ok(x) => Some(x),
+                Err(e) => {
+                    error!("Resolution error: {:?}", e);
+                    None
+                }
+            }
+        });
+    pin_mut!(stream);
+    let val = stream.next().await;
     debug!("val: {:?}", val);
-    Err(FindError::NoServerFound.into())
+    match val {
+        Some(x) => Ok(x),
+        None => Err(FindError::NoServerFound.into()),
+    }
 }
 
 #[tokio::main]
@@ -76,13 +145,21 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     debug!("Tcp server bound to {:?}", addr);
     let port = addr.port();
 
-    let remote_host = find_server().await?;
+    let (remote_host, kvs) = find_server().await?;
 
-    let _registration = register(port).await?;
+    debug!("Found game host {:?} with kvs {:?}", remote_host, kvs);
+
+    let _registration = register(port, kvs).await?;
 
     loop {
         let (stream, addr) = server.accept().await?;
         debug!("New connection from {:?}", addr);
+        tokio::spawn(async move {
+            let _stream = stream;
+            loop {
+                tokio::time::delay_for(TIMEOUT).await;
+            }
+        });
     }
 }
 
@@ -90,4 +167,8 @@ async fn main() -> Result<(), Box<dyn StdError>> {
 enum FindError {
     #[error("No ttr server found")]
     NoServerFound,
+    #[error("Failed to parse data")]
+    DataParseError,
+    #[error("No resolutions found")]
+    NoResolutionFound,
 }
