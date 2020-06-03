@@ -1,7 +1,8 @@
 use std::{collections::HashMap, error::Error as StdError, net::SocketAddr, time::Duration};
 
 use async_dnssd::{
-    BrowsedFlags, RegisterData, Registration, ResolvedHostFlags, StreamTimeoutExt, TxtRecord,
+    BrowsedFlags, RegisterData, Registration, ResolvedHostFlags, ScopedSocketAddr,
+    StreamTimeoutExt, TxtRecord,
 };
 use futures::{pin_mut, prelude::*};
 use log::*;
@@ -11,7 +12,6 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
-use uuid::Uuid;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ttr", about = "Ticket to ride app man in the middle server")]
@@ -33,7 +33,7 @@ async fn register(port: u16, kvs: HashMap<String, String>) -> anyhow::Result<Reg
         .iter()
         .fold(TxtRecord::new(), |mut record, (key, value)| {
             let value = if key == "_d" {
-                format!("{}mitm", value)
+                format!("{}", value)
             } else {
                 value.clone()
             };
@@ -95,6 +95,12 @@ async fn find_server() -> anyhow::Result<(SocketAddr, HashMap<String, String>)> 
                                             error!("Resolution error: {:?}", e);
                                             None
                                         }
+                                    }
+                                })
+                                .filter_map(|result| async {
+                                    match result.address {
+                                        ScopedSocketAddr::V4 { .. } => Some(result),
+                                        ScopedSocketAddr::V6 { .. } => None,
                                     }
                                 })
                                 .filter_map(|result| async {
