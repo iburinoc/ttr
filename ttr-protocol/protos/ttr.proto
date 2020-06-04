@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+message Heartbeat {
+}
+
+message Connect {
+    string name = 2;
+    uint64 peerId = 3;
+    string ctx = 4;
+}
