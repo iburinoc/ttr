@@ -1,0 +1,10 @@
+[package]
+name = "ttr-mdns"
+version = "0.1.0"
+authors = ["Sean Purcell <me@seanp.xyz>"]
+edition = "2018"
+
+[dependencies]
+async-dnssd = { git = "https://github.com/stbuehler/rust-async-dnssd" }
+log = "0.4"
+uuid = { version = "0.8", features = ["v4"] }
