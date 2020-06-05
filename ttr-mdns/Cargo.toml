@@ -6,5 +6,8 @@ edition = "2018"
 
 [dependencies]
 async-dnssd = { git = "https://github.com/stbuehler/rust-async-dnssd" }
+futures = "0.3"
 log = "0.4"
+radix_fmt = "1.0"
+thiserror = "1.0"
 uuid = { version = "0.8", features = ["v4"] }
