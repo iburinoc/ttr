@@ -1,5 +1,5 @@
 [package]
-name = "ttr-mdns"
+name = "ttr-net"
 version = "0.1.0"
 authors = ["Sean Purcell <me@seanp.xyz>"]
 edition = "2018"
@@ -9,5 +9,8 @@ async-dnssd = { git = "https://github.com/stbuehler/rust-async-dnssd" }
 futures = "0.3"
 log = "0.4"
 radix_fmt = "1.0"
+tokio = { version = "0.2", features = ["full"] }
 thiserror = "1.0"
 uuid = { version = "0.8", features = ["v4"] }
+
+ttr-protocol = { path = "../ttr-protocol" }
