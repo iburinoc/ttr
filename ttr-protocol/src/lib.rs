@@ -32,6 +32,25 @@ macro_rules! define_msg {
                     _ => Ok(Message::Unrecognized { kind, data: data.into() }),
                 }
             }
+
+            pub fn serialize(&self) -> Vec<u8> {
+                let mut msg = Vec::new();
+                msg.extend_from_slice(&self.kind().to_be_bytes());
+                msg.extend_from_slice(&[0u8; 4]);
+                let len = match self {
+                    $(
+                        Message::$t(m) => {
+                            use protobuf::Message;
+
+                            m.write_to_vec(&mut msg).unwrap();
+                            msg.len() - 8
+                        }
+                    )*
+                    Message::Unrecognized { data, .. } => {msg.extend_from_slice(data); data.len() }
+                };
+                msg[4..8].copy_from_slice(&len.to_be_bytes());
+                msg
+            }
         }
     };
 }
@@ -55,7 +74,17 @@ pub enum ParseError {
     ProtobufError(#[from] ProtobufError),
 }
 
+impl Message {
+    pub fn parse_header(data: &[u8]) -> Result<Header, ParseError> {
+        Header::parse(data)
+    }
+}
+
 impl Header {
+    pub fn bytes_required(&self) -> usize {
+        self.mlen as usize
+    }
+
     pub fn parse(data: &[u8]) -> Result<Header, ParseError> {
         use std::convert::TryInto;
 
