@@ -114,7 +114,7 @@ pub async fn register(server: &Server) -> Result<Registration, DnssdError> {
         server.address.port(),
         RegisterData {
             txt: record.data(),
-            name: Some(name.as_str()),
+            //name: Some(name.as_str()),
             ..Default::default()
         },
     )?
@@ -123,8 +123,10 @@ pub async fn register(server: &Server) -> Result<Registration, DnssdError> {
     Ok(registration)
 }
 
-pub async fn browse(timeout: Option<Duration>) -> Result<Option<Server>, MdnsError> {
-    let timeout = timeout.unwrap_or(Duration::from_secs(3600 * 24 * 365 * 20));
+pub async fn browse(timeout: impl Into<Option<Duration>>) -> Result<Option<Server>, MdnsError> {
+    let timeout = timeout
+        .into()
+        .unwrap_or(Duration::from_secs(3600 * 24 * 365 * 20));
     let browse = async_dnssd::browse(MDNS_TYPE)?.timeout(timeout)?;
     let stream = browse
         .map_err(MdnsError::IoError)

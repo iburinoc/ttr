@@ -844,6 +844,7 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
+ "rand",
  "structopt",
  "thiserror",
  "tokio",
