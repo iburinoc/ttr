@@ -114,7 +114,7 @@ pub async fn register(server: &Server) -> Result<Registration, DnssdError> {
         server.address.port(),
         RegisterData {
             txt: record.data(),
-            //name: Some(name.as_str()),
+            name: Some(name.as_str()),
             ..Default::default()
         },
     )?

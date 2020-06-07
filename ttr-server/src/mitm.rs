@@ -34,13 +34,17 @@ impl Mitm {
         Ok(Mitm { target })
     }
 
+    pub fn from_target(target: Server) -> Mitm {
+        Mitm { target }
+    }
+
     pub fn target(&self) -> &Server {
         &self.target
     }
 
     pub async fn run<T>(
         &self,
-        registered_as: Server,
+        _registered_as: &Server,
         input: impl Stream<Item = Message>,
         output: T,
     ) -> anyhow::Result<()>

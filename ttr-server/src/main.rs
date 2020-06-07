@@ -1,16 +1,13 @@
-use std::{error::Error as StdError, net::SocketAddr};
+use std::error::Error as StdError;
 
-use futures::{pin_mut, prelude::*};
 use log::*;
 use structopt::StructOpt;
-use thiserror::Error;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-};
-use uuid::Uuid;
+use tokio::net::{TcpListener, TcpStream};
 
-use ttr_net::{connection::Connection, mdns};
+use ttr_net::{
+    connection::Connection,
+    mdns::{self, Server},
+};
 
 mod mitm;
 
@@ -28,6 +25,11 @@ struct Opt {
     port: u16,
 }
 
+async fn handle_stream(stream: TcpStream, server: &Server, mitm: &Mitm) -> anyhow::Result<()> {
+    let (_connection, receiver, sender) = Connection::from_stream(stream);
+    mitm.run(server, receiver, sender).await
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
     env_logger::builder()
@@ -39,13 +41,11 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     let mut server = TcpListener::bind((args.host.as_str(), args.port)).await?;
     let addr = server.local_addr()?;
     info!("Tcp server bound to {:?}", addr);
-    let port = addr.port();
 
     let mitm = Mitm::new().await?;
     info!("Found mitm target {:?}", mitm.target());
 
     let mut fake_server = mitm.target().clone();
-    fake_server.uuid = Uuid::new_v4();
     fake_server.address = addr;
     fake_server.name += "mitm";
     fake_server.peer_id = rand::random::<u64>();
@@ -54,8 +54,15 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     info!("Registered as {:?}", fake_server);
 
     loop {
-        tokio::time::delay_for(std::time::Duration::from_secs(10)).await
+        let (stream, addr) = server.accept().await?;
+        info!("New connection from {:?}", addr);
+        let fake_server = fake_server.clone();
+        let mitm = Mitm::from_target(mitm.target().clone());
+        tokio::spawn(async move {
+            match handle_stream(stream, &fake_server, &mitm).await {
+                Ok(()) => info!("{:?} finished", addr),
+                Err(e) => error!("Error occurred for {:?}: {:?}", addr, e),
+            }
+        });
     }
-
-    Ok(())
 }
