@@ -25,9 +25,9 @@ struct Opt {
     port: u16,
 }
 
-async fn handle_stream(stream: TcpStream, server: &Server, mitm: &Mitm) -> anyhow::Result<()> {
+async fn handle_stream(stream: TcpStream, mitm: Mitm) -> anyhow::Result<()> {
     let (_connection, receiver, sender) = Connection::from_stream(stream);
-    mitm.run(server, receiver, sender).await
+    mitm.run(receiver, sender).await
 }
 
 #[tokio::main]
@@ -42,10 +42,10 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     let addr = server.local_addr()?;
     info!("Tcp server bound to {:?}", addr);
 
-    let mitm = Mitm::new().await?;
-    info!("Found mitm target {:?}", mitm.target());
+    let target = mitm::find_target().await?;
+    info!("Found mitm target {:?}", target);
 
-    let mut fake_server = mitm.target().clone();
+    let mut fake_server = target.clone();
     fake_server.address = addr;
     fake_server.name += "mitm";
     fake_server.peer_id = rand::random::<u64>();
@@ -56,10 +56,9 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     loop {
         let (stream, addr) = server.accept().await?;
         info!("New connection from {:?}", addr);
-        let fake_server = fake_server.clone();
-        let mitm = Mitm::from_target(mitm.target().clone());
+        let mitm = Mitm::new(target.clone(), fake_server.clone());
         tokio::spawn(async move {
-            match handle_stream(stream, &fake_server, &mitm).await {
+            match handle_stream(stream, mitm).await {
                 Ok(()) => info!("{:?} finished", addr),
                 Err(e) => error!("Error occurred for {:?}: {:?}", addr, e),
             }
