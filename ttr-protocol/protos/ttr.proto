@@ -8,3 +8,39 @@ message Connect {
     uint64 peerId = 3;
     string ctx = 4;
 }
+
+message Hello {
+    string name = 1;
+    string uuid = 2;
+    int64 colorId = 3;
+    int64 protocolVersion = 4;
+}
+
+message Query {
+    Hello hello = 1;
+    // Action action = 2;
+}
+
+message Welcome {
+}
+
+message GameStarted {
+}
+
+message ConnectedPlayers {
+    message Player {
+        string uuid = 1;
+        string name = 2;
+        int64 seat = 5;
+    }
+
+    repeated Player players = 1;
+    uint32 totalSeats = 3;
+}
+
+message Response {
+    Welcome welcome = 1;
+    GameStarted gameStarted = 2;
+    ConnectedPlayers connectedPlayers = 3;
+    // Action action = 5;
+}
