@@ -7,6 +7,7 @@ use futures::{
     sink::{Sink, SinkExt},
     stream::{Stream, StreamExt},
 };
+use log::*;
 use thiserror::Error;
 
 use ttr_net::mdns::Server;
@@ -34,10 +35,6 @@ impl Mitm {
         }
     }
 
-    pub fn target(&self) -> &Server {
-        &self.target
-    }
-
     pub async fn run<T>(self, input: impl Stream<Item = Message>, output: T) -> anyhow::Result<()>
     where
         T: Sink<Message>,
@@ -55,7 +52,9 @@ impl Mitm {
                 m = client_recv => {
                     match m {
                         Some(m) => {
+                            debug!("Received {:?} from client", m);
                             let m = self.filter_client_to_server(m);
+                            debug!("Sending  {:?} to server", m);
                             sender.send(m).await?
                         },
                         None => return Err(MitmError::ConnectionClosed.into()),
@@ -64,7 +63,9 @@ impl Mitm {
                 m = server_recv => {
                     match m {
                         Some(m) => {
+                            debug!("Received {:?} from server", m);
                             let m = self.filter_server_to_client(m);
+                            debug!("Sending  {:?} to client", m);
                             output.send(m).await?
                         },
                         None => return Err(MitmError::ConnectionClosed.into()),

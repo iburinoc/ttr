@@ -3,11 +3,9 @@ use std::error::Error as StdError;
 use log::*;
 use structopt::StructOpt;
 use tokio::net::{TcpListener, TcpStream};
+use uuid::Uuid;
 
-use ttr_net::{
-    connection::Connection,
-    mdns::{self, Server},
-};
+use ttr_net::{connection::Connection, mdns};
 
 mod mitm;
 
@@ -32,9 +30,7 @@ async fn handle_stream(stream: TcpStream, mitm: Mitm) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
-    env_logger::builder()
-        .filter(Some("ttr"), LevelFilter::Info)
-        .init();
+    env_logger::builder().init();
 
     let args = Opt::from_args();
 
@@ -49,6 +45,7 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     fake_server.address = addr;
     fake_server.name += "mitm";
     fake_server.peer_id = rand::random::<u64>();
+    fake_server.uuid = Uuid::new_v4();
 
     let _registration = mdns::register(&fake_server).await?;
     info!("Registered as {:?}", fake_server);

@@ -48,7 +48,7 @@ macro_rules! define_msg {
                     )*
                     Message::Unrecognized { data, .. } => {msg.extend_from_slice(data); data.len() }
                 };
-                msg[4..8].copy_from_slice(&len.to_be_bytes());
+                msg[4..8].copy_from_slice(&(len as u32).to_be_bytes());
                 msg
             }
         }
