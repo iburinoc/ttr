@@ -17,6 +17,7 @@ use ttr_protocol::Message;
 pub struct Mitm {
     target: Server,
     registered_as: Server,
+    unrecognized_path: Option<String>,
 }
 
 #[derive(Error, Debug)]
@@ -28,10 +29,11 @@ enum MitmError {
 }
 
 impl Mitm {
-    pub fn new(target: Server, registered_as: Server) -> Mitm {
+    pub fn new(target: Server, registered_as: Server, unrecognized_path: Option<String>) -> Mitm {
         Mitm {
             target,
             registered_as,
+            unrecognized_path,
         }
     }
 
@@ -42,6 +44,8 @@ impl Mitm {
     {
         let (_connection, receiver, sender) = ttr_net::connect(self.target.address).await?;
 
+        let mut i = 0;
+
         pin_mut!(input, output, receiver, sender);
         loop {
             let client_recv = input.next().fuse();
@@ -49,29 +53,49 @@ impl Mitm {
             pin_mut!(client_recv, server_recv);
 
             select! {
-                m = client_recv => {
-                    match m {
-                        Some(m) => {
-                            debug!("Received {:?} from client", m);
-                            let m = self.filter_client_to_server(m);
-                            debug!("Sending  {:?} to server", m);
-                            sender.send(m).await?
-                        },
-                        None => return Err(MitmError::ConnectionClosed.into()),
-                    }
-                }
-                m = server_recv => {
-                    match m {
-                        Some(m) => {
-                            debug!("Received {:?} from server", m);
-                            let m = self.filter_server_to_client(m);
-                            debug!("Sending  {:?} to client", m);
-                            output.send(m).await?
-                        },
-                        None => return Err(MitmError::ConnectionClosed.into()),
-                    }
-                }
+               m = client_recv => {
+                   match m {
+                       Some(m) => {
+                           self.log_unrecog(m.clone(), "c2s", i);
+                           debug!("Received {:?} from client", m);
+                           let m = self.filter_client_to_server(m);
+                           debug!("Sending  {:?} to server", m);
+                           sender.send(m).await?
+                       },
+                       None => return Err(MitmError::ConnectionClosed.into()),
+                   }
+               }
+               m = server_recv => {
+                   match m {
+                       Some(m) => {
+                           self.log_unrecog(m.clone(), "s2c", i);
+                           debug!("Received {:?} from server", m);
+                           let m = self.filter_server_to_client(m);
+                           debug!("Sending  {:?} to client", m);
+                           output.send(m).await?
+                       },
+                       None => return Err(MitmError::ConnectionClosed.into()),
+                   }
+               }
             }
+
+            i += 1;
+        }
+    }
+
+    fn log_unrecog(&self, m: Message, typ: &'static str, idx: i32) {
+        let path = match &self.unrecognized_path {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        match m {
+            Message::Unrecognized { kind, data } => {
+                tokio::spawn(async move {
+                    let path = format!("{}{}_{}_k{}", path, idx, typ, kind);
+                    tokio::fs::write(path, data).await.unwrap();
+                });
+            }
+            _ => {}
         }
     }
 

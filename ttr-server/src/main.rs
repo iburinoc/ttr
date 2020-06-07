@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::error::Error as StdError;
 
 use log::*;
@@ -21,6 +23,10 @@ struct Opt {
     /// Port to bind to
     #[structopt(short, long, default_value = "0")]
     port: u16,
+
+    /// Path to write unrecognized packet files to
+    #[structopt(short, long = "unrecog")]
+    unrecognized_path: Option<String>,
 }
 
 async fn handle_stream(stream: TcpStream, mitm: Mitm) -> anyhow::Result<()> {
@@ -53,7 +59,11 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     loop {
         let (stream, addr) = server.accept().await?;
         info!("New connection from {:?}", addr);
-        let mitm = Mitm::new(target.clone(), fake_server.clone());
+        let mitm = Mitm::new(
+            target.clone(),
+            fake_server.clone(),
+            args.unrecognized_path.clone(),
+        );
         tokio::spawn(async move {
             match handle_stream(stream, mitm).await {
                 Ok(()) => info!("{:?} finished", addr),
