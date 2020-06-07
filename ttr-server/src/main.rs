@@ -53,7 +53,9 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     let _registration = mdns::register(&fake_server).await?;
     info!("Registered as {:?}", fake_server);
 
-    loop {}
+    loop {
+        tokio::time::delay_for(std::time::Duration::from_secs(10)).await
+    }
 
     Ok(())
 }

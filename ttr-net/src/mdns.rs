@@ -21,7 +21,7 @@ pub struct Server {
     pub name: String,
     pub peer_id: u64,
     pub uuid: Uuid,
-    pub opaque: u32,      // TODO: Figure out what this means.  Seems related to map.
+    pub opaque: String, // TODO: Figure out what this means.  Seems related to map.
     pub game_status: u32, // TODO: Figure out what this means.  Maybe player count or something?
 }
 
@@ -57,7 +57,7 @@ impl Server {
         };
         let get_str = |name| String::from_utf8(get(name)?.into()).map_err(|_| inv_txt());
 
-        let opaque = get_int("opaque")?;
+        let opaque = get_str("opaque")?;
         let game_status = get_int("gameStatus")?;
         let name = get_str("_d")?;
         let uuid = std::str::from_utf8(get("uuid")?)
@@ -78,7 +78,7 @@ impl Server {
     fn gen_record(&self) -> TxtRecord {
         let mut record = TxtRecord::new();
         record
-            .set_value("opaque".as_bytes(), self.opaque.to_string().as_bytes())
+            .set_value("opaque".as_bytes(), self.opaque.as_bytes())
             .unwrap();
         record
             .set_value(
