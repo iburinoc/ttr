@@ -22,6 +22,16 @@ message Query {
 }
 
 message Welcome {
+    message Options {
+        uint64 seed = 1;
+        uint32 map = 2;
+        uint64 matchId = 7;
+        uint32 rulesVersion = 8;
+    }
+
+    Options options = 3;
+    bool resuming = 5;
+    int64 protocolVersion = 6;
 }
 
 message GameStarted {
