@@ -12,7 +12,7 @@ use protobuf::Message as _;
 use thiserror::Error;
 
 use ttr_net::mdns::Server;
-use ttr_protocol::{Action, ClientMessage, Message, ServerMessage};
+use ttr_protocol::{Action, ClientMessage, Message, Response, ServerMessage};
 
 #[derive(Clone)]
 pub struct Mitm {
@@ -62,9 +62,9 @@ impl Mitm {
                    match m {
                        Some(m) => {
                            self.log_unrecog(m.clone(), "c2s", i);
-                           debug!("Received {:?} from client", m);
+                           debug!("Received {:?} from client ({})", m, i);
                            let m = self.filter_client_to_server(m);
-                           debug!("Sending  {:?} to server", m);
+                           debug!("Sending  {:?} to server ({})", m, i);
                            sender.send(m).await?
                        },
                        None => return Err(MitmError::ConnectionClosed.into()),
@@ -74,9 +74,9 @@ impl Mitm {
                    match m {
                        Some(m) => {
                            self.log_unrecog(m.clone(), "s2c", i);
-                           debug!("Received {:?} from server", m);
+                           debug!("Received {:?} from server ({})", m, i);
                            let m = self.filter_server_to_client(m);
-                           debug!("Sending  {:?} to client", m);
+                           debug!("Sending  {:?} to client ({})", m, i);
                            output.send(m).await?
                        },
                        None => return Err(MitmError::ConnectionClosed.into()),
@@ -116,7 +116,24 @@ impl Mitm {
 
     fn filter_server_to_client(&self, msg: ServerMessage) -> ServerMessage {
         use Message::*;
+        use Response::*;
         match msg {
+            Action(a) => {
+                let a = match a {
+                    ConnectedPlayers(mut c) => {
+                        c.players
+                            .iter_mut()
+                            .filter(|p| p.uuid == self.target.uuid.to_hyphenated_ref().to_string())
+                            .for_each(|p| {
+                                p.uuid = self.registered_as.uuid.to_hyphenated_ref().to_string();
+                                p.name = self.registered_as.name.clone();
+                            });
+                        ConnectedPlayers(c)
+                    }
+                    a => a,
+                };
+                Action(a)
+            }
             Connect(mut c) => {
                 c.peerId = self.registered_as.peer_id;
                 c.name = self.registered_as.name.clone();
