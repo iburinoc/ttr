@@ -13,3 +13,5 @@
 19: c built bucuresti to constantinople
 20: s built london to amsterdam
 21: c built frankfurt to munchen
+22: s dug tunnel from sarajevo to sofia
+23: c tried to tunnel from zurich to venice
