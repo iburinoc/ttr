@@ -1,0 +1,15 @@
+7: s picked cadiz-stockholm and athina-wilno
+8: c picked kopenhagen-erzurum and paris-wien
+9: s picked red from slot 4
+10: s picked green from slot 5
+11: c picked green from slot 4
+12: c picked yellow from slot 3
+13: s picked blue from slot 3 (new yellow)
+14: s picked blue from slot 4 (new rainbow)
+15: c picked yellow from slot 3 (new white)
+16: c picked white from slot 3 (new pink)
+17: s picked rainbow from deck
+18: s picked orange from deck
+19: c built bucuresti to constantinople
+20: s built london to amsterdam
+21: c built frankfurt to munchen
