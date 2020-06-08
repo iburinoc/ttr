@@ -8,6 +8,7 @@ use futures::{
     stream::{Stream, StreamExt},
 };
 use log::*;
+use protobuf::Message as _;
 use thiserror::Error;
 
 use ttr_net::mdns::Server;
@@ -92,13 +93,23 @@ impl Mitm {
             Some(p) => p.clone(),
             None => return,
         };
+        let write_bytes = |bytes, kind| {
+            tokio::spawn(async move {
+                let path = format!("{}{}_{}_k{}", path, idx, typ, kind);
+                tokio::fs::write(path, bytes).map(Result::unwrap).await;
+            });
+        };
         match m {
             Message::Unrecognized { kind, data } => {
-                tokio::spawn(async move {
-                    let path = format!("{}{}_{}_k{}", path, idx, typ, kind);
-                    tokio::fs::write(path, data).await.unwrap();
-                });
+                write_bytes(data, kind);
             }
+            Message::Action(a) => match a.get_unrecognized() {
+                Some(m) => {
+                    let data = m.write_to_bytes().unwrap();
+                    write_bytes(data, 1);
+                }
+                None => (),
+            },
             _ => {}
         }
     }

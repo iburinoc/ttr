@@ -22,6 +22,13 @@ macro_rules! define_proto_variant {
             fn from_proto(p: Self::Proto) -> Self {
                 p.into()
             }
+
+            fn get_unrecognized(&self) -> Option<&Self::Proto> {
+                match self {
+                    $ty::Unrecognized(m) => Some(m),
+                    _ => None,
+                }
+            }
         }
 
         impl From<protos::$ty> for $ty {
@@ -156,6 +163,8 @@ pub trait Action: Clone + Send + 'static {
 
     fn to_proto(s: Self) -> Self::Proto;
     fn from_proto(p: Self::Proto) -> Self;
+
+    fn get_unrecognized(&self) -> Option<&Self::Proto>;
 }
 
 #[derive(Debug, Copy, Clone, Default)]

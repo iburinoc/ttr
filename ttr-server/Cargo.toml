@@ -10,6 +10,7 @@ async-dnssd = { git = "https://github.com/stbuehler/rust-async-dnssd" }
 env_logger = "0.7"
 futures = "0.3"
 log = "0.4"
+protobuf = "2.14"
 rand = "0.7"
 structopt = "0.3"
 thiserror = "1.0"
