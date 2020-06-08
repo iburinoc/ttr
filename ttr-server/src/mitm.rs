@@ -11,7 +11,7 @@ use log::*;
 use thiserror::Error;
 
 use ttr_net::mdns::Server;
-use ttr_protocol::Message;
+use ttr_protocol::{Action, ClientMessage, Message, ServerMessage};
 
 #[derive(Clone)]
 pub struct Mitm {
@@ -37,9 +37,13 @@ impl Mitm {
         }
     }
 
-    pub async fn run<T>(self, input: impl Stream<Item = Message>, output: T) -> anyhow::Result<()>
+    pub async fn run<T>(
+        self,
+        input: impl Stream<Item = ClientMessage>,
+        output: T,
+    ) -> anyhow::Result<()>
     where
-        T: Sink<Message>,
+        T: Sink<ServerMessage>,
         T::Error: StdError + Send + Sync + 'static,
     {
         let (_connection, receiver, sender) = ttr_net::connect(self.target.address).await?;
@@ -83,7 +87,7 @@ impl Mitm {
         }
     }
 
-    fn log_unrecog(&self, m: Message, typ: &'static str, idx: i32) {
+    fn log_unrecog<A: Action>(&self, m: Message<A>, typ: &'static str, idx: i32) {
         let path = match &self.unrecognized_path {
             Some(p) => p.clone(),
             None => return,
@@ -99,7 +103,7 @@ impl Mitm {
         }
     }
 
-    fn filter_server_to_client(&self, msg: Message) -> Message {
+    fn filter_server_to_client(&self, msg: ServerMessage) -> ServerMessage {
         use Message::*;
         match msg {
             Connect(mut c) => {
@@ -111,7 +115,7 @@ impl Mitm {
         }
     }
 
-    fn filter_client_to_server(&self, msg: Message) -> Message {
+    fn filter_client_to_server(&self, msg: ClientMessage) -> ClientMessage {
         use Message::*;
         match msg {
             msg => msg,

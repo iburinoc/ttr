@@ -1,72 +1,57 @@
 use derive_more::From;
-use protobuf::error::ProtobufError;
+use protobuf::{error::ProtobufError, Message as ProtoMessage};
 use thiserror::Error;
 
-mod protos;
+pub mod protos;
 
-pub use protos::*;
-
-macro_rules! define_msg {
-    ($($t:ident => $k:expr ,)*) => {
-        #[derive(Debug, Clone, From)]
-        pub enum Message {
-            $( $t($t), )*
-            Unrecognized { kind: u32, data: Vec<u8> },
+macro_rules! define_proto_variant {
+    ($ty:ident, $($ctor:ident : $field:ident,)*) => {
+        #[derive(Debug, Clone)]
+        pub enum $ty {
+            $( $ctor(protos::$ctor), )*
+            Unrecognized(protos::$ty),
         }
 
-        impl Message {
-            pub fn kind(&self) -> u32 {
-                match self {
-                    $(
-                        Message::$t(_) => $k,
-                    )*
-                    Message::Unrecognized { kind, .. } => *kind,
-                }
+        impl Action for $ty {
+            type Proto = protos::$ty;
+
+            fn to_proto(s: Self) -> Self::Proto {
+                s.into()
             }
 
-            pub fn parse(kind: u32, data: &[u8]) -> Result<Message, ProtobufError> {
-                match kind {
-                    $(
-                        $k => Ok(Message::$t(protobuf::parse_from_bytes::<$t>(data)?)),
-                    )*
-                    _ => Ok(Message::Unrecognized { kind, data: data.into() }),
-                }
+            fn from_proto(p: Self::Proto) -> Self {
+                p.into()
             }
+        }
 
-            pub fn serialize(&self) -> Vec<u8> {
-                let mut msg = Vec::new();
-                msg.extend_from_slice(&self.kind().to_be_bytes());
-                msg.extend_from_slice(&[0u8; 4]);
-                let len = match self {
+        impl From<protos::$ty> for $ty {
+            fn from(mut m: protos::$ty) -> Self {
+                $(
+                    if let Some(f) = m.$field.take() {
+                        $ty::$ctor(f)
+                    } else
+                )*
+                    {
+                        $ty::Unrecognized(m)
+                    }
+            }
+        }
+
+        impl From<$ty> for protos::$ty {
+            fn from(m: $ty) -> Self {
+                match m {
                     $(
-                        Message::$t(m) => {
-                            use protobuf::Message;
-
-                            m.write_to_vec(&mut msg).unwrap();
-                            msg.len() - 8
+                        $ty::$ctor(m) => {
+                            let mut msg = protos::$ty::new();
+                            msg.$field = protobuf::SingularPtrField::some(m);
+                            msg
                         }
                     )*
-                    Message::Unrecognized { data, .. } => {
-                        msg.extend_from_slice(data);
-                        data.len()
-                    }
-                };
-                msg[4..8].copy_from_slice(&(len as u32).to_be_bytes());
-                msg
+                        $ty::Unrecognized(msg) => msg,
+                }
             }
         }
-    };
-}
-
-define_msg! {
-    Heartbeat => 2,
-    Connect => 3,
-}
-
-#[derive(Debug, Copy, Clone, Default)]
-pub struct Header {
-    kind: u32,
-    mlen: u32,
+    }
 }
 
 #[derive(Debug, Error)]
@@ -77,10 +62,106 @@ pub enum ParseError {
     ProtobufError(#[from] ProtobufError),
 }
 
-impl Message {
+#[derive(Debug, Clone, From)]
+pub enum Message<A: Action> {
+    Action(A),
+    Heartbeat(protos::Heartbeat),
+    Connect(protos::Connect),
+    Unrecognized { kind: u32, data: Vec<u8> },
+}
+
+pub type ClientMessage = Message<Query>;
+pub type ServerMessage = Message<Response>;
+
+impl<A: Action> Message<A> {
+    pub fn kind(&self) -> u32 {
+        use Message::*;
+        match self {
+            Action(_) => 1,
+            Heartbeat(_) => 2,
+            Connect(_) => 3,
+            Unrecognized { kind, .. } => *kind,
+        }
+    }
+
+    fn from_data(kind: u32, data: &[u8]) -> Result<Message<A>, ParseError> {
+        use Message::*;
+        match kind {
+            1 => {
+                let m = protobuf::parse_from_bytes::<A::Proto>(data)?;
+                Ok(Action(A::from_proto(m)))
+            }
+            2 => Ok(Heartbeat(protobuf::parse_from_bytes::<protos::Heartbeat>(
+                data,
+            )?)),
+            3 => Ok(Connect(protobuf::parse_from_bytes::<protos::Connect>(
+                data,
+            )?)),
+            _ => Ok(Unrecognized {
+                kind,
+                data: data.into(),
+            }),
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        use Message::*;
+        let mut msg = Vec::new();
+        msg.extend_from_slice(&self.kind().to_be_bytes());
+        msg.extend_from_slice(&[0u8; 4]);
+        let len = match self {
+            Action(a) => write_and_get_len(&mut msg, &A::to_proto(a.clone())),
+            Heartbeat(m) => write_and_get_len(&mut msg, m),
+            Connect(m) => write_and_get_len(&mut msg, m),
+            Unrecognized { data, .. } => {
+                msg.extend_from_slice(data);
+                data.len() as u32
+            }
+        };
+        msg[4..8].copy_from_slice(&(len as u32).to_be_bytes());
+        msg
+    }
+
     pub fn parse_header(data: &[u8]) -> Result<Header, ParseError> {
         Header::parse(data)
     }
+
+    pub fn parse(header: &Header, data: &[u8]) -> Result<Message<A>, ParseError> {
+        let len = data.len();
+        if len == header.mlen as _ {
+            Ok(Message::from_data(header.kind, data)?)
+        } else {
+            Err(ParseError::WrongByteCount(len, header.mlen as _))
+        }
+    }
+}
+
+fn write_and_get_len<T: ProtoMessage>(v: &mut Vec<u8>, m: &T) -> u32 {
+    m.write_to_vec(v).unwrap();
+    (v.len() - 8) as u32
+}
+
+define_proto_variant! { Query,
+    Hello : hello,
+}
+
+define_proto_variant! { Response,
+    Welcome : welcome,
+    GameStarted : gameStarted,
+    ConnectedPlayers : connectedPlayers,
+}
+
+pub trait Action: Clone + Send + 'static {
+    type Proto: ProtoMessage;
+
+    fn to_proto(s: Self) -> Self::Proto;
+    fn from_proto(p: Self::Proto) -> Self;
+}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct Header {
+    kind: u32,
+    mlen: u32,
 }
 
 impl Header {
@@ -99,15 +180,6 @@ impl Header {
             Ok(Header { kind, mlen })
         } else {
             Err(ParseError::WrongByteCount(len, 8))
-        }
-    }
-
-    pub fn parse_message(&self, data: &[u8]) -> Result<Message, ParseError> {
-        let len = data.len();
-        if len == self.mlen as _ {
-            Ok(Message::parse(self.kind, data)?)
-        } else {
-            Err(ParseError::WrongByteCount(len, self.mlen as _))
         }
     }
 }

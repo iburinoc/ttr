@@ -17,7 +17,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use ttr_protocol::{Message, ParseError};
+use ttr_protocol::{Action, Message, ParseError, Query, Response};
 
 pub struct Connection {
     read_task: Option<(JoinHandle<Result<(), ConnectionError>>, oneshot::Sender<()>)>,
@@ -33,12 +33,16 @@ pub enum ConnectionError {
 }
 
 impl Connection {
-    pub fn from_stream(
+    pub fn from_stream<Receiving: Action, Sending: Action>(
         s: TcpStream,
-    ) -> (Connection, mpsc::Receiver<Message>, mpsc::Sender<Message>) {
+    ) -> (
+        Connection,
+        mpsc::Receiver<Message<Receiving>>,
+        mpsc::Sender<Message<Sending>>,
+    ) {
         let (reader, writer) = s.into_split();
 
-        let (sender, close_write, write_handle) = writer_task(writer);
+        let (sender, close_write, write_handle) = writer_task::<Sending>(writer);
         let (receiver, close_read, read_handle) = reader_task(reader, sender.clone());
 
         (
@@ -50,18 +54,32 @@ impl Connection {
             sender,
         )
     }
+
+    pub fn from_client_connection(
+        s: TcpStream,
+    ) -> (
+        Connection,
+        mpsc::Receiver<Message<Query>>,
+        mpsc::Sender<Message<Response>>,
+    ) {
+        Self::from_stream(s)
+    }
 }
 
 pub async fn connect<A: ToSocketAddrs>(
     addr: A,
-) -> io::Result<(Connection, mpsc::Receiver<Message>, mpsc::Sender<Message>)> {
+) -> io::Result<(
+    Connection,
+    mpsc::Receiver<Message<Response>>,
+    mpsc::Sender<Message<Query>>,
+)> {
     Ok(Connection::from_stream(TcpStream::connect(addr).await?))
 }
 
-fn writer_task(
+fn writer_task<A: Action>(
     mut stream: OwnedWriteHalf,
 ) -> (
-    mpsc::Sender<Message>,
+    mpsc::Sender<Message<A>>,
     oneshot::Sender<()>,
     JoinHandle<Result<(), ConnectionError>>,
 ) {
@@ -85,16 +103,19 @@ fn writer_task(
     (sender, close_sender, handle)
 }
 
-async fn send_message(stream: &mut OwnedWriteHalf, m: Message) -> Result<(), ConnectionError> {
+async fn send_message<A: Action>(
+    stream: &mut OwnedWriteHalf,
+    m: Message<A>,
+) -> Result<(), ConnectionError> {
     let data = m.serialize();
     Ok(stream.write_all(&data).await?)
 }
 
-fn reader_task(
+fn reader_task<A: Action, B: Action>(
     mut stream: OwnedReadHalf,
-    mut writer: mpsc::Sender<Message>,
+    mut writer: mpsc::Sender<Message<B>>,
 ) -> (
-    mpsc::Receiver<Message>,
+    mpsc::Receiver<Message<A>>,
     oneshot::Sender<()>,
     JoinHandle<Result<(), ConnectionError>>,
 ) {
@@ -104,7 +125,7 @@ fn reader_task(
         let close = close_receiver.fuse();
         pin_mut!(close);
         loop {
-            let message = read_message(&mut stream).fuse();
+            let message = read_message::<A>(&mut stream).fuse();
             pin_mut!(message);
 
             select! {
@@ -125,12 +146,14 @@ fn reader_task(
     (receiver, close_sender, handle)
 }
 
-async fn read_message(stream: &mut OwnedReadHalf) -> Result<Message, ConnectionError> {
+async fn read_message<A: Action>(
+    stream: &mut OwnedReadHalf,
+) -> Result<Message<A>, ConnectionError> {
     let mut buf = [0u8; 8];
     stream.read_exact(&mut buf).await?;
-    let header = Message::parse_header(&buf)?;
+    let header = Message::<A>::parse_header(&buf)?;
 
     let mut buf = vec![0u8; header.bytes_required()];
     stream.read_exact(&mut buf).await?;
-    Ok(header.parse_message(&buf)?)
+    Ok(Message::parse(&header, &buf)?)
 }
