@@ -54,3 +54,23 @@ message Response {
     ConnectedPlayers connectedPlayers = 3;
     // Action action = 5;
 }
+
+message Event {
+    enum Kind {
+        ERROR = 0;
+        ROUTE = 1;
+        STATION = 2;
+        TICKETS = 3;
+        PICK_OPEN = 4;
+        PICK_DECK = 5;
+        RETURN_TICKETS = 7;
+        CHOOSE_FIRST_TICKETS = 15;
+    }
+    Kind kind = 1;
+    uint32 player = 2;
+    uint32 route = 3;
+    uint32 city = 4;
+    repeated uint32 card = 5;
+    uint32 slot = 6;
+    repeated uint32 ticket = 8;
+}
