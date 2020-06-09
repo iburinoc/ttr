@@ -2,20 +2,23 @@
 
 use std::error::Error as StdError;
 
-use log::*;
-use structopt::StructOpt;
-use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
-use ttr_net::{connection::Connection, mdns};
+use structopt::StructOpt;
 
+mod dummy;
 mod mitm;
-
-use mitm::Mitm;
+mod util;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ttr", about = "Ticket to ride app man in the middle server")]
-struct Opt {
+pub enum Cmd {
+    Mitm(MitmArgs),
+    Dummy(DummyArgs),
+}
+
+#[derive(Debug, StructOpt)]
+pub struct MitmArgs {
     /// Hostname to bind to
     #[structopt(short = "H", long, default_value = "127.0.0.1")]
     host: String,
@@ -24,51 +27,45 @@ struct Opt {
     #[structopt(short, long, default_value = "0")]
     port: u16,
 
-    /// Path to write unrecognized packet files to
-    #[structopt(short, long = "unrecog")]
-    unrecognized_path: Option<String>,
+    #[structopt(flatten)]
+    player_id: PlayerId,
+
+    /// Path to write packet files to
+    #[structopt(short = "l", long = "log-path")]
+    log_path: Option<String>,
 }
 
-async fn handle_stream(stream: TcpStream, mitm: Mitm) -> anyhow::Result<()> {
-    let (_connection, receiver, sender) = Connection::from_stream(stream);
-    mitm.run(receiver, sender).await
+#[derive(Debug, StructOpt)]
+pub struct DummyArgs {
+    #[structopt(flatten)]
+    player_id: PlayerId,
+
+    /// Path to write packet files to
+    #[structopt(short = "l", long = "log-path")]
+    log_path: Option<String>,
+}
+
+#[derive(Debug, StructOpt)]
+pub struct PlayerId {
+    /// What peer id to advertise as
+    #[structopt(short = "P", long)]
+    peer_id: Option<u64>,
+
+    /// What UUID to advertise as
+    #[structopt(short = "u", long)]
+    uuid: Option<Uuid>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
     env_logger::builder().init();
 
-    let args = Opt::from_args();
+    let args = Cmd::from_args();
 
-    let mut server = TcpListener::bind((args.host.as_str(), args.port)).await?;
-    let addr = server.local_addr()?;
-    info!("Tcp server bound to {:?}", addr);
-
-    let target = mitm::find_target().await?;
-    info!("Found mitm target {:?}", target);
-
-    let mut fake_server = target.clone();
-    fake_server.address = addr;
-    fake_server.name += "mitm";
-    fake_server.peer_id = rand::random::<u64>();
-    fake_server.uuid = Uuid::new_v4();
-
-    let _registration = mdns::register(&fake_server).await?;
-    info!("Registered as {:?}", fake_server);
-
-    loop {
-        let (stream, addr) = server.accept().await?;
-        info!("New connection from {:?}", addr);
-        let mitm = Mitm::new(
-            target.clone(),
-            fake_server.clone(),
-            args.unrecognized_path.clone(),
-        );
-        tokio::spawn(async move {
-            match handle_stream(stream, mitm).await {
-                Ok(()) => info!("{:?} finished", addr),
-                Err(e) => error!("Error occurred for {:?}: {:?}", addr, e),
-            }
-        });
+    match args {
+        Cmd::Mitm(args) => mitm::run(args).await?,
+        Cmd::Dummy(args) => dummy::run(args).await?,
     }
+
+    Ok(())
 }

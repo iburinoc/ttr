@@ -1,6 +1,5 @@
-use std::{error::Error as StdError, time::Duration};
+use std::error::Error as StdError;
 
-use anyhow::Context;
 use futures::{
     future::FutureExt,
     pin_mut, select,
@@ -8,33 +7,37 @@ use futures::{
     stream::{Stream, StreamExt},
 };
 use log::*;
-use protobuf::Message as _;
 use thiserror::Error;
+use tokio::net::{TcpListener, TcpStream};
+use uuid::Uuid;
 
-use ttr_net::mdns::Server;
-use ttr_protocol::{Action, ClientMessage, Message, Response, ServerMessage};
+use ttr_net::{
+    connection::Connection,
+    mdns::{self, Server},
+};
+use ttr_protocol::{ClientMessage, Message, Response, ServerMessage};
+
+use super::util;
 
 #[derive(Clone)]
 pub struct Mitm {
     target: Server,
     registered_as: Server,
-    unrecognized_path: Option<String>,
+    log_path: Option<String>,
 }
 
 #[derive(Error, Debug)]
 enum MitmError {
-    #[error("No ttr server to target found")]
-    NoServerFound,
     #[error("Connection closed unexpectedly")]
     ConnectionClosed,
 }
 
 impl Mitm {
-    pub fn new(target: Server, registered_as: Server, unrecognized_path: Option<String>) -> Mitm {
+    pub fn new(target: Server, registered_as: Server, log_path: Option<String>) -> Mitm {
         Mitm {
             target,
             registered_as,
-            unrecognized_path,
+            log_path,
         }
     }
 
@@ -61,9 +64,8 @@ impl Mitm {
                m = client_recv => {
                    match m {
                        Some(m) => {
-                           self.log_unrecog(m.clone(), "c2s", i);
+                           util::log_packet(self.log_path.clone(), m.clone(), "c2s", i);
                            debug!("Received {:?} from client ({})", m, i);
-                           let m = self.filter_client_to_server(m);
                            debug!("Sending  {:?} to server ({})", m, i);
                            sender.send(m).await?
                        },
@@ -73,7 +75,7 @@ impl Mitm {
                m = server_recv => {
                    match m {
                        Some(m) => {
-                           self.log_unrecog(m.clone(), "s2c", i);
+                           util::log_packet(self.log_path.clone(), m.clone(), "s2c", i);
                            debug!("Received {:?} from server ({})", m, i);
                            let m = self.filter_server_to_client(m);
                            debug!("Sending  {:?} to client ({})", m, i);
@@ -85,32 +87,6 @@ impl Mitm {
             }
 
             i += 1;
-        }
-    }
-
-    fn log_unrecog<A: Action>(&self, m: Message<A>, typ: &'static str, idx: i32) {
-        let path = match &self.unrecognized_path {
-            Some(p) => p.clone(),
-            None => return,
-        };
-        let write_bytes = |bytes, kind| {
-            tokio::spawn(async move {
-                let path = format!("{}{}_{}_k{}", path, idx, typ, kind);
-                tokio::fs::write(path, bytes).map(Result::unwrap).await;
-            });
-        };
-        match m {
-            Message::Unrecognized { kind, data } => {
-                write_bytes(data, kind);
-            }
-            Message::Action(a) => match a.get_unrecognized() {
-                Some(m) => {
-                    let data = m.write_to_bytes().unwrap();
-                    write_bytes(data, 1);
-                }
-                None => (),
-            },
-            _ => {}
         }
     }
 
@@ -142,20 +118,42 @@ impl Mitm {
             msg => msg,
         }
     }
+}
 
-    fn filter_client_to_server(&self, msg: ClientMessage) -> ClientMessage {
-        use Message::*;
-        match msg {
-            msg => msg,
-        }
+pub async fn run(args: super::MitmArgs) -> anyhow::Result<()> {
+    let mut server = TcpListener::bind((args.host.as_str(), args.port)).await?;
+    let addr = server.local_addr()?;
+    info!("Tcp server bound to {:?}", addr);
+
+    let target = util::find_server().await?;
+    info!("Found mitm target {:?}", target);
+
+    let mut fake_server = target.clone();
+    fake_server.address = addr;
+    fake_server.name += "mitm";
+    fake_server.peer_id = args
+        .player_id
+        .peer_id
+        .unwrap_or_else(|| rand::random::<u64>());
+    fake_server.uuid = args.player_id.uuid.unwrap_or_else(|| Uuid::new_v4());
+
+    let _registration = mdns::register(&fake_server).await?;
+    info!("Registered as {:?}", fake_server);
+
+    loop {
+        let (stream, addr) = server.accept().await?;
+        info!("New connection from {:?}", addr);
+        let mitm = Mitm::new(target.clone(), fake_server.clone(), args.log_path.clone());
+        tokio::spawn(async move {
+            match handle_stream(stream, mitm).await {
+                Ok(()) => info!("{:?} finished", addr),
+                Err(e) => error!("Error occurred for {:?}: {:?}", addr, e),
+            }
+        });
     }
 }
 
-pub async fn find_target() -> anyhow::Result<Server> {
-    let target = ttr_net::browse(Duration::from_secs(3))
-        .await
-        .context("Error looking for server")?
-        .ok_or(MitmError::NoServerFound)?;
-
-    Ok(target)
+async fn handle_stream(stream: TcpStream, mitm: Mitm) -> anyhow::Result<()> {
+    let (_connection, receiver, sender) = Connection::from_stream(stream);
+    mitm.run(receiver, sender).await
 }
