@@ -25,6 +25,8 @@ message Welcome {
     message Options {
         uint64 seed = 1;
         uint32 map = 2;
+        uint32 players = 3;
+        uint32 firstPlayer = 4;
         uint64 matchId = 7;
         uint32 rulesVersion = 8;
     }
@@ -57,24 +59,30 @@ message Response {
 
 message Event {
     message Inner {
-        enum Kind {
-            ERROR = 0;
-            ROUTE = 1;
-            STATION = 2;
-            TICKETS = 3;
-            PICK_OPEN = 4;
-            PICK_DECK = 5;
-            RETURN_TICKETS = 7;
-            CHOOSE_FIRST_TICKETS = 15;
-        }
-        Kind kind = 1;
+        uint32 idx = 1;
         uint32 player = 2;
-        uint32 route = 3;
-        uint32 city = 4;
-        repeated uint32 card = 5;
-        uint32 slot = 6;
-        repeated uint32 ticket = 8;
+        Move move = 4;
     }
 
-    Inner e = 1;
+    Inner i = 1;
+}
+
+message Move {
+    enum Kind {
+        ERROR = 0;
+        ROUTE = 1;
+        STATION = 2;
+        TICKETS = 3;
+        PICK_OPEN = 4;
+        PICK_DECK = 5;
+        RETURN_TICKETS = 7;
+        CHOOSE_FIRST_TICKETS = 15;
+    }
+    Kind kind = 1;
+    uint32 player = 2;
+    uint32 route = 3;
+    uint32 city = 4;
+    repeated uint32 card = 5;
+    uint32 slot = 6;
+    repeated uint32 ticket = 8;
 }
