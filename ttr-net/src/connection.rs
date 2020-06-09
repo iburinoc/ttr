@@ -2,7 +2,7 @@ use std::io;
 
 use futures::{
     channel::{mpsc, oneshot},
-    future::FutureExt,
+    future::{self, FutureExt},
     pin_mut, select,
     sink::SinkExt,
     stream::StreamExt,
@@ -63,6 +63,20 @@ impl Connection {
         mpsc::Sender<Message<Response>>,
     ) {
         Self::from_stream(s)
+    }
+
+    pub async fn close(mut self) -> Result<(), ConnectionError> {
+        let (read_handle, read_closer) = self.read_task.take().unwrap();
+        let (write_handle, write_closer) = self.write_task.take().unwrap();
+
+        let _ = read_closer.send(());
+        let _ = write_closer.send(());
+        let (read_res, write_res) = future::join(
+            read_handle.map(Result::unwrap),
+            write_handle.map(Result::unwrap),
+        )
+        .await;
+        read_res.and(write_res)
     }
 }
 
