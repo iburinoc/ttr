@@ -67,6 +67,8 @@ pub enum ParseError {
     WrongByteCount(usize, usize),
     #[error("Error processing protobuf: {0:?}")]
     ProtobufError(#[from] ProtobufError),
+    #[error("Unrecognized message kind: {0}")]
+    UnrecognizedKind(u32),
 }
 
 #[derive(Debug, Clone, From)]
@@ -74,7 +76,6 @@ pub enum Message<A: Action> {
     Action(A),
     Heartbeat(protos::Heartbeat),
     Connect(protos::Connect),
-    Unrecognized { kind: u32, data: Vec<u8> },
 }
 
 pub type ClientMessage = Message<Query>;
@@ -87,7 +88,6 @@ impl<A: Action> Message<A> {
             Action(_) => 1,
             Heartbeat(_) => 2,
             Connect(_) => 3,
-            Unrecognized { kind, .. } => *kind,
         }
     }
 
@@ -104,10 +104,7 @@ impl<A: Action> Message<A> {
             3 => Ok(Connect(protobuf::parse_from_bytes::<protos::Connect>(
                 data,
             )?)),
-            _ => Ok(Unrecognized {
-                kind,
-                data: data.into(),
-            }),
+            _ => Err(ParseError::UnrecognizedKind(kind)),
         }
     }
 
@@ -120,10 +117,6 @@ impl<A: Action> Message<A> {
             Action(a) => write_and_get_len(&mut msg, &A::to_proto(a.clone())),
             Heartbeat(m) => write_and_get_len(&mut msg, m),
             Connect(m) => write_and_get_len(&mut msg, m),
-            Unrecognized { data, .. } => {
-                msg.extend_from_slice(data);
-                data.len() as u32
-            }
         };
         msg[4..8].copy_from_slice(&(len as u32).to_be_bytes());
         msg
@@ -150,12 +143,14 @@ fn write_and_get_len<T: ProtoMessage>(v: &mut Vec<u8>, m: &T) -> u32 {
 
 define_proto_variant! { Query,
     Hello : hello,
+    Event : event,
 }
 
 define_proto_variant! { Response,
     Welcome : welcome,
     GameStarted : gameStarted,
     ConnectedPlayers : connectedPlayers,
+    Event : event,
 }
 
 pub trait Action: Clone + Send + 'static {
