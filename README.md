@@ -63,3 +63,15 @@ the same as the one it actually found.
 
 It seems the service name string is just the random peer id converted to a string in base 36.
 At this point I can start writing a slightly more active MITM.
+
+## Randomization
+It appears randomization is handled in a distributed manner, where only the seed is shared in advance
+and each system keeps its state intact.
+
+This makes things much more difficult because it means an AI player would need to replicate this RNG.
+
+## Train cards
+It seems like each card as a unique ID, presumably from 0-109.
+Ids 39, 42, 45 are blue, so blue is probably id 4 ([36,48)).
+104 and 106 are rainbox, so they're the top of the range.
+84 and 86 are green, id 7.
