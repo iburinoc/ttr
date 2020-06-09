@@ -43,6 +43,10 @@ pub struct DummyArgs {
     /// Path to write packet files to
     #[structopt(short = "l", long = "log-path")]
     log_path: Option<String>,
+
+    /// Name to play as
+    #[structopt(short, long, default_value = "dummy")]
+    name: String,
 }
 
 #[derive(Debug, StructOpt)]
@@ -58,7 +62,9 @@ pub struct PlayerId {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
-    env_logger::builder().init();
+    env_logger::init_from_env(
+        env_logger::Env::new().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
+    );
 
     let args = Cmd::from_args();
 
