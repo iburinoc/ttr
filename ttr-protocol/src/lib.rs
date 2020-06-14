@@ -192,10 +192,10 @@ impl Header {
 mod tests {
     use super::*;
 
-    fn parse_hex(s: &str) -> Result<Message, ParseError> {
+    fn parse_hex(s: &str) -> Result<ServerMessage, ParseError> {
         let data = hex::decode(s).unwrap();
         let header = Header::parse(&data[0..8])?;
-        header.parse_message(&data[8..])
+        Message::parse(&header, &data[8..])
     }
 
     macro_rules! parse_test {
