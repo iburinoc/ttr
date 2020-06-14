@@ -1,7 +1,7 @@
 use std::{io, net::SocketAddr, time::Duration};
 
 use futures::{
-    pin_mut,
+    future, pin_mut,
     stream::{StreamExt, TryStreamExt},
 };
 use log::*;
@@ -145,17 +145,16 @@ pub async fn browse(timeout: impl Into<Option<Duration>>) -> Result<Option<Serve
                             .timeout(timeout)?
                             .try_filter_map(|result| async {
                                 if result.flags.intersects(ResolvedHostFlags::ADD) {
-                                    Ok(Some(result.address))
+                                    Ok(Some(result.address.into()))
                                 } else {
                                     Ok(None)
                                 }
                             })
+                            .try_filter(|addr: &SocketAddr| future::ready(addr.is_ipv4()))
                             .map(move |addr| match addr {
-                                Ok(addr) => Server::parse(
-                                    service_name.as_str(),
-                                    r.txt.as_slice(),
-                                    addr.into(),
-                                ),
+                                Ok(addr) => {
+                                    Server::parse(service_name.as_str(), r.txt.as_slice(), addr)
+                                }
                                 Err(e) => Err(e.into()),
                             });
                         Ok(Some(s))
