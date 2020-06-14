@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "ttr-engine",
     "ttr-net",
     "ttr-protocol",
     "ttr-server",
