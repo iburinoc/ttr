@@ -70,6 +70,11 @@ and each system keeps its state intact.
 
 This makes things much more difficult because it means an AI player would need to replicate this RNG.
 
+### Train Deck
+The train deck is randomized by initializing a vector of all train cards 0-109 in order,
+and picking one at random using C++'s uniform int distribution, and then erasing that from the vector,
+every time a card is dealt.
+
 ## Train cards
 It seems like each card as a unique ID, presumably from 0-109.
 Ids 39, 42, 45 are blue, so blue is probably id 4 ([36,48)).
