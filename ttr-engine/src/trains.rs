@@ -60,9 +60,7 @@ impl TrainDeck {
 
     pub fn dealOne(&mut self, rand: &mut Rand) -> Train {
         let idx = rand.uniform(0, self.deck.len() as u32) as usize;
-        let val = self.deck[idx];
-        self.deck.remove(idx);
-        val
+        self.deck.remove(idx)
     }
 
     pub fn deal(&mut self, rand: &mut Rand, num: usize) -> Vec<Train> {
