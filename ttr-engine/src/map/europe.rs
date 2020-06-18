@@ -157,8 +157,8 @@ impl Map for Europe {
             shuffled.push(vec.remove(0));
             shuffled
         };
-        let bigs = shuffle(bigs);
         let smalls = shuffle(smalls);
+        let bigs = shuffle(bigs);
 
         Europe { smalls, bigs }
     }
@@ -180,5 +180,18 @@ impl Map for Europe {
 
     fn cities(&self) -> &'static [City] {
         CITIES.as_slice()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_initial_tickets() {
+        let mut rand = Rand::new(18446744073292070813u64 as u32);
+        let mut europe = Europe::new(&mut rand);
+        let tickets: Vec<_> = europe.initial_tickets(1)[0].iter().map(|c| c.id).collect();
+        assert_eq!(tickets, vec![41, 0, 30, 15]);
     }
 }

@@ -5,7 +5,9 @@ mod europe;
 pub use europe::Europe;
 
 pub trait Map {
-    fn new(rand: &mut Rand) -> Self;
+    fn new(rand: &mut Rand) -> Self
+    where
+        Self: Sized;
 
     fn initial_tickets(&mut self, players: u32) -> Vec<Vec<&'static Ticket>>;
 
