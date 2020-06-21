@@ -1,5 +1,6 @@
 use super::rand::Rand;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Colour {
     Pink,
     White,
@@ -58,13 +59,20 @@ impl TrainDeck {
         TrainDeck { deck, discard }
     }
 
-    pub fn dealOne(&mut self, rand: &mut Rand) -> Train {
+    pub fn deal_one(&mut self, rand: &mut Rand) -> Train {
         let idx = rand.uniform(0, self.deck.len() as u32) as usize;
         self.deck.remove(idx)
     }
 
     pub fn deal(&mut self, rand: &mut Rand, num: usize) -> Vec<Train> {
-        (0..num).map(|_| self.dealOne(rand)).collect()
+        (0..num).map(|_| self.deal_one(rand)).collect()
+    }
+
+    pub fn discard<I>(&mut self, cards: I)
+    where
+        I: IntoIterator<Item = Train>,
+    {
+        self.discard.extend(cards)
     }
 }
 
