@@ -1,8 +1,10 @@
 mod map;
+mod player;
 mod rand;
 mod trains;
 
 use map::Map;
+use player::Player;
 use rand::Rand;
 use trains::{Colour, Train, TrainDeck};
 
@@ -11,6 +13,7 @@ pub struct Engine {
     map: Box<dyn Map>,
     trains: TrainDeck,
     face_up: FaceUp,
+    players: Vec<Player>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -36,11 +39,19 @@ impl Engine {
         let map = Box::new(M::new(&mut rand));
         let mut trains = TrainDeck::new();
         let face_up = FaceUp::new(&mut rand, &mut trains);
+        let mut players = (0..players)
+            .map(|id| {
+                let mut p = Player::new(id);
+                p.hand = trains.deal(&mut rand, 4);
+                p
+            })
+            .collect();
         Engine {
             rand,
             map,
             trains,
             face_up,
+            players,
         }
     }
 }
@@ -69,7 +80,9 @@ impl FaceUp {
     }
 
     fn draw(&mut self, rand: &mut Rand, deck: &mut TrainDeck, slot: usize) -> Train {
-        std::mem::replace(&mut self.0[slot], deck.deal_one(rand))
+        let result = std::mem::replace(&mut self.0[slot], deck.deal_one(rand));
+        self.check_for_rainbow(rand, deck);
+        result
     }
 }
 
@@ -84,5 +97,15 @@ mod test {
         let engine = Engine::new::<map::Europe>(27683789, 2);
         let colours: Vec<_> = engine.face_up.0.iter().map(|x| x.colour()).collect();
         assert_eq!(colours, vec![White, Orange, Pink, Green, Rainbow]);
+    }
+
+    #[test]
+    fn test_hand() {
+        use Colour::*;
+
+        let engine = Engine::new::<map::Europe>(18446744071963584756u64 as u32, 2);
+        let mut colours: Vec<_> = engine.players[0].hand.iter().map(|x| x.colour()).collect();
+        colours.sort();
+        assert_eq!(colours, vec![Orange, Red, Green, Green]);
     }
 }

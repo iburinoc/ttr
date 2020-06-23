@@ -1,6 +1,6 @@
 use super::rand::Rand;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Colour {
     Pink,
     White,
