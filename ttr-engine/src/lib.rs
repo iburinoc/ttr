@@ -14,6 +14,27 @@ pub struct Engine {
     trains: TrainDeck,
     face_up: FaceUp,
     players: Vec<Player>,
+
+    state: GameState,
+}
+
+#[derive(Debug)]
+pub enum GameState {
+    InitialTickets(Vec<InitialTicketState>),
+    Turn { player: u32, state: TurnState },
+}
+
+#[derive(Debug)]
+pub struct InitialTicketState {
+    options: Vec<&'static Ticket>,
+    selected: Option<Vec<&'static Ticket>>,
+}
+
+#[derive(Debug)]
+pub enum TurnState {
+    Start,
+    PickAnotherTicket,
+    SelectingTickets(Vec<&'static Ticket>),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -34,24 +55,47 @@ pub struct Ticket {
 struct FaceUp([Train; 5]);
 
 impl Engine {
-    pub fn new<M: Map + 'static>(seed: u32, players: u32) -> Self {
+    pub fn new<M: Map + 'static>(seed: u32, num_players: u32) -> Self {
         let mut rand = Rand::new(seed);
-        let map = Box::new(M::new(&mut rand));
+        let mut map = Box::new(M::new(&mut rand));
         let mut trains = TrainDeck::new();
         let face_up = FaceUp::new(&mut rand, &mut trains);
-        let mut players = (0..players)
+        let mut players = (0..num_players)
             .map(|id| {
                 let mut p = Player::new(id);
                 p.hand = trains.deal(&mut rand, 4);
                 p
             })
             .collect();
+        let state = GameState::InitialTickets(
+            map.initial_tickets(num_players)
+                .into_iter()
+                .map(|tickets| InitialTicketState {
+                    options: tickets,
+                    selected: None,
+                })
+                .collect(),
+        );
         Engine {
             rand,
             map,
             trains,
             face_up,
             players,
+            state,
+        }
+    }
+
+    pub fn state(&self) -> &GameState {
+        &self.state
+    }
+}
+
+impl GameState {
+    pub fn action_required(&self, player: u32) -> bool {
+        match self {
+            InitialTickets(players) => players[player as usize].is_some(),
+            Turn { player: turn_player, _ } => player == turn_player,
         }
     }
 }
