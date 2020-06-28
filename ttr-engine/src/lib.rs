@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 mod map;
 mod player;
 mod rand;
@@ -18,22 +20,22 @@ pub struct Engine {
     state: GameState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GameState {
     InitialTickets(Vec<InitialTicketState>),
     Turn { player: u32, state: TurnState },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InitialTicketState {
     options: Vec<&'static Ticket>,
     selected: Option<Vec<&'static Ticket>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TurnState {
     Start,
-    PickAnotherTicket,
+    PickAnotherTrain,
     SelectingTickets(Vec<&'static Ticket>),
 }
 
@@ -54,13 +56,37 @@ pub struct Ticket {
 #[derive(Debug, Copy, Clone)]
 struct FaceUp([Train; 5]);
 
+#[derive(Debug, Error)]
+pub enum ActionError {
+    #[error("Invalid player number: {0}/{0}")]
+    InvalidPlayerNumber(u32, usize),
+    #[error("Action is not required from player {0} for current game state: {1:?}")]
+    ActionNotRequired(u32, GameState),
+    #[error("Action {0} invalid for game state {1:?}")]
+    WrongState(&'static str, GameState),
+    #[error("Selected tickets {0:?} are not a subset of available tickets {1:?}")]
+    BadTicketSelection(Vec<u32>, Vec<&'static Ticket>),
+    #[error("Not enough tickets selected: {0:?}/{1}")]
+    NotEnoughTickets(Vec<u32>, u32),
+}
+
+macro_rules! get_state {
+    ($self:expr, $action:expr, $match:pat => $val:expr) => {
+        (if let $match = &mut $self.state {
+            Ok($val)
+        } else {
+            Err(ActionError::WrongState($action, $self.state.clone()))
+        })?
+    };
+}
+
 impl Engine {
     pub fn new<M: Map + 'static>(seed: u32, num_players: u32) -> Self {
         let mut rand = Rand::new(seed);
         let mut map = Box::new(M::new(&mut rand));
         let mut trains = TrainDeck::new();
         let face_up = FaceUp::new(&mut rand, &mut trains);
-        let mut players = (0..num_players)
+        let players = (0..num_players)
             .map(|id| {
                 let mut p = Player::new(id);
                 p.hand = trains.deal(&mut rand, 4);
@@ -89,13 +115,79 @@ impl Engine {
     pub fn state(&self) -> &GameState {
         &self.state
     }
+
+    pub fn select_initial_tickets(&mut self, player: u32, ids: &[u32]) -> Result<(), ActionError> {
+        self.check_player_number(player)?;
+        self.check_action_required(player)?;
+        let mut tickets = get_state!(self,
+            "initial tickets",
+            GameState::InitialTickets(state) => std::mem::replace(state, Vec::new()));
+        {
+            let player_state = &mut tickets[player as usize];
+            let selection: Vec<_> = player_state
+                .options
+                .iter()
+                .filter(|x| ids.contains(&x.id))
+                .copied()
+                .collect();
+
+            if ids.len() < 2 {
+                return Err(ActionError::NotEnoughTickets(ids.to_vec(), 2));
+            }
+
+            if selection.len() != ids.len() {
+                return Err(ActionError::BadTicketSelection(
+                    ids.to_vec(),
+                    player_state.options.clone(),
+                ));
+            }
+            player_state.selected = Some(selection);
+        }
+        if tickets.iter().filter(|x| x.selected.is_some()).count() == self.players.len() {
+            tickets
+                .iter_mut()
+                .zip(self.players.iter_mut())
+                .for_each(|(state, player)| {
+                    player.tickets = state.selected.take().unwrap().to_vec();
+                });
+            self.state = GameState::Turn {
+                player: 0,
+                state: TurnState::Start,
+            };
+        } else {
+            self.state = GameState::InitialTickets(tickets);
+        }
+
+        Ok(())
+    }
+
+    fn check_player_number(&self, player: u32) -> Result<(), ActionError> {
+        if player as usize >= self.players.len() {
+            Err(ActionError::InvalidPlayerNumber(player, self.players.len()))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_action_required(&self, player: u32) -> Result<(), ActionError> {
+        if !self.state.action_required(player) {
+            Err(ActionError::ActionNotRequired(player, self.state.clone()))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl GameState {
     pub fn action_required(&self, player: u32) -> bool {
+        use GameState::*;
+
         match self {
-            InitialTickets(players) => players[player as usize].is_some(),
-            Turn { player: turn_player, _ } => player == turn_player,
+            InitialTickets(players) => players[player as usize].selected.is_none(),
+            Turn {
+                player: turn_player,
+                ..
+            } => player == *turn_player,
         }
     }
 }
@@ -151,5 +243,24 @@ mod test {
         let mut colours: Vec<_> = engine.players[0].hand.iter().map(|x| x.colour()).collect();
         colours.sort();
         assert_eq!(colours, vec![Orange, Red, Green, Green]);
+    }
+
+    #[test]
+    fn test_initial_tickets() {
+        let engine = Engine::new::<map::Europe>(18446744071963584756u64 as u32, 2);
+
+        let player_state = {
+            let state = engine.state();
+            assert!(state.action_required(0));
+
+            use GameState::*;
+            match state {
+                InitialTickets(state) => state[0].clone(),
+                _ => panic!("Unexpected state"),
+            }
+        };
+
+        let option_ids: Vec<_> = player_state.options.iter().map(|x| x.id).collect();
+        assert_eq!(option_ids, vec![10, 43, 5, 21]);
     }
 }
