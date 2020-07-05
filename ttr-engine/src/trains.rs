@@ -1,3 +1,5 @@
+use std::fmt;
+
 use super::rand::Rand;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -13,8 +15,14 @@ pub enum Colour {
     Rainbow,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Train(u8);
+
+impl fmt::Debug for Train {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}({})", self.colour(), self.0)
+    }
+}
 
 pub struct TrainDeck {
     deck: Vec<Train>,

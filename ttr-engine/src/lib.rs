@@ -1,3 +1,7 @@
+use std::convert::{TryFrom, TryInto};
+use std::fmt::Debug;
+
+use log::*;
 use thiserror::Error;
 
 mod map;
@@ -24,6 +28,7 @@ pub struct Engine {
 pub enum GameState {
     InitialTickets(Vec<InitialTicketState>),
     Turn { player: u32, state: TurnState },
+    GameEnded,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +61,12 @@ pub struct Ticket {
 #[derive(Debug, Copy, Clone)]
 struct FaceUp([Train; 5]);
 
+#[derive(Debug, Copy, Clone)]
+pub enum CardSlot {
+    Slot(u8),
+    Deck,
+}
+
 #[derive(Debug, Error)]
 pub enum ActionError {
     #[error("Invalid player number: {0}/{0}")]
@@ -68,15 +79,17 @@ pub enum ActionError {
     BadTicketSelection(Vec<u32>, Vec<&'static Ticket>),
     #[error("Not enough tickets selected: {0:?}/{1}")]
     NotEnoughTickets(Vec<u32>, u32),
+    #[error("Index out of range [0, {0}): {1}")]
+    IndexOutOfRange(usize, String),
 }
 
 macro_rules! get_state {
-    ($self:expr, $action:expr, $match:pat => $val:expr) => {
-        (if let $match = &mut $self.state {
-            Ok($val)
-        } else {
-            Err(ActionError::WrongState($action, $self.state.clone()))
-        })?
+    ($self:expr, $action:expr, $($state:pat)|+ => $val:expr) => {
+        let val = match &mut $self.state {
+            $($state => Ok($val))*,
+            _ => Err(ActionError::WrongState($action, $self.state.clone())),
+        };
+        val?
     };
 }
 
@@ -141,6 +154,7 @@ impl Engine {
                     player_state.options.clone(),
                 ));
             }
+            trace!("Player {} selected {:?}", player, selection);
             player_state.selected = Some(selection);
         }
         if tickets.iter().filter(|x| x.selected.is_some()).count() == self.players.len() {
@@ -159,6 +173,17 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    pub fn draw_card(
+        &mut self,
+        player: u32,
+        slot: impl TryInto<CardSlot, Error = ActionError>,
+    ) -> Result<Train, ActionError> {
+        let slot = slot.try_into()?;
+        self.check_player_number(player)?;
+
+        unimplemented!()
     }
 
     fn check_player_number(&self, player: u32) -> Result<(), ActionError> {
@@ -188,6 +213,7 @@ impl GameState {
                 player: turn_player,
                 ..
             } => player == *turn_player,
+            GameEnded => false,
         }
     }
 }
@@ -221,6 +247,33 @@ impl FaceUp {
         result
     }
 }
+
+macro_rules! impl_card_slot {
+    ($t:ty) => {
+        impl TryFrom<$t> for CardSlot {
+            type Error = ActionError;
+
+            fn try_from(idx: $t) -> Result<Self, ActionError> {
+                let gen_error = || ActionError::IndexOutOfRange(5, format!("{:?}", idx));
+                let idx: u8 = idx.try_into().map_err(|_| gen_error())?;
+                if idx >= 5 {
+                    Err(gen_error())
+                } else {
+                    Ok(CardSlot::Slot(idx))
+                }
+            }
+        }
+    };
+}
+
+impl_card_slot!(u8);
+impl_card_slot!(u16);
+impl_card_slot!(u32);
+impl_card_slot!(u64);
+impl_card_slot!(i8);
+impl_card_slot!(i16);
+impl_card_slot!(i32);
+impl_card_slot!(i64);
 
 #[cfg(test)]
 mod test {
