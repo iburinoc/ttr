@@ -1,5 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
+use std::ops::Index;
 
 use log::*;
 use thiserror::Error;
@@ -26,10 +27,13 @@ pub struct Engine {
 
 #[derive(Debug, Clone)]
 pub enum GameState {
-    InitialTickets(Vec<InitialTicketState>),
+    InitialTickets(InitialTicketSelections),
     Turn { player: u32, state: TurnState },
     GameEnded,
 }
+
+#[derive(Debug, Clone)]
+pub struct InitialTicketSelections(Vec<InitialTicketState>);
 
 #[derive(Debug, Clone)]
 pub struct InitialTicketState {
@@ -81,15 +85,16 @@ pub enum ActionError {
     NotEnoughTickets(Vec<u32>, u32),
     #[error("Index out of range [0, {0}): {1}")]
     IndexOutOfRange(usize, String),
+    #[error("Rainbow train taken as second pick")]
+    RainbowTrainTakenSecond,
 }
 
-macro_rules! get_state {
-    ($self:expr, $action:expr, $($state:pat)|+ => $val:expr) => {
-        let val = match &mut $self.state {
-            $($state => Ok($val))*,
-            _ => Err(ActionError::WrongState($action, $self.state.clone())),
-        };
-        val?
+macro_rules! match_state {
+    ($state:expr, $action:expr, $($pattern:pat => $val:expr),+) => {
+        (match $state {
+            $($pattern => Ok($val),)*
+            _ => Err(ActionError::WrongState($action, $state.clone())),
+        })?
     };
 }
 
@@ -106,7 +111,7 @@ impl Engine {
                 p
             })
             .collect();
-        let state = GameState::InitialTickets(
+        let state = GameState::InitialTickets(InitialTicketSelections(
             map.initial_tickets(num_players)
                 .into_iter()
                 .map(|tickets| InitialTicketState {
@@ -114,7 +119,7 @@ impl Engine {
                     selected: None,
                 })
                 .collect(),
-        );
+        ));
         Engine {
             rand,
             map,
@@ -132,44 +137,39 @@ impl Engine {
     pub fn select_initial_tickets(&mut self, player: u32, ids: &[u32]) -> Result<(), ActionError> {
         self.check_player_number(player)?;
         self.check_action_required(player)?;
-        let mut tickets = get_state!(self,
-            "initial tickets",
-            GameState::InitialTickets(state) => std::mem::replace(state, Vec::new()));
-        {
-            let player_state = &mut tickets[player as usize];
-            let selection: Vec<_> = player_state
-                .options
-                .iter()
-                .filter(|x| ids.contains(&x.id))
-                .copied()
-                .collect();
-
-            if ids.len() < 2 {
-                return Err(ActionError::NotEnoughTickets(ids.to_vec(), 2));
+        let state = &mut self.state;
+        let selections: Option<Vec<_>> = {
+            let selections = match_state!(state,
+                "initial tickets",
+                GameState::InitialTickets(selections) => selections);
+            selections.select_tickets(player, ids)?;
+            if selections.complete() {
+                Some(
+                    selections
+                        .0
+                        .iter_mut()
+                        .map(|x| x.selected.take().unwrap())
+                        .collect(),
+                )
+            } else {
+                None
             }
-
-            if selection.len() != ids.len() {
-                return Err(ActionError::BadTicketSelection(
-                    ids.to_vec(),
-                    player_state.options.clone(),
-                ));
+        };
+        match selections {
+            Some(mut tickets) => {
+                tickets
+                    .iter_mut()
+                    .zip(self.players.iter_mut())
+                    .for_each(|(state, player)| {
+                        std::mem::swap(state, &mut player.tickets);
+                    });
+                *state = GameState::Turn {
+                    player: 0,
+                    state: TurnState::Start,
+                };
+                trace!("Ticket selections complete");
             }
-            trace!("Player {} selected {:?}", player, selection);
-            player_state.selected = Some(selection);
-        }
-        if tickets.iter().filter(|x| x.selected.is_some()).count() == self.players.len() {
-            tickets
-                .iter_mut()
-                .zip(self.players.iter_mut())
-                .for_each(|(state, player)| {
-                    player.tickets = state.selected.take().unwrap().to_vec();
-                });
-            self.state = GameState::Turn {
-                player: 0,
-                state: TurnState::Start,
-            };
-        } else {
-            self.state = GameState::InitialTickets(tickets);
+            None => (),
         }
 
         Ok(())
@@ -183,6 +183,19 @@ impl Engine {
         let slot = slot.try_into()?;
         self.check_player_number(player)?;
 
+        let first = match_state!(&self.state,
+            "draw train card",
+            GameState::Turn { state: TurnState::Start, .. } => true,
+            GameState::Turn { state: TurnState::PickAnotherTrain, .. } => false
+        );
+
+        match slot {
+            CardSlot::Slot(i) => {
+                let rainbow = self.face_up[i].colour() == Colour::Rainbow;
+                if rainbow && !first {}
+            }
+            _ => unimplemented!(),
+        };
         unimplemented!()
     }
 
@@ -208,13 +221,54 @@ impl GameState {
         use GameState::*;
 
         match self {
-            InitialTickets(players) => players[player as usize].selected.is_none(),
+            InitialTickets(players) => players.0[player as usize].selected.is_none(),
             Turn {
                 player: turn_player,
                 ..
             } => player == *turn_player,
             GameEnded => false,
         }
+    }
+}
+
+impl InitialTicketSelections {
+    fn select_tickets(&mut self, player: u32, ids: &[u32]) -> Result<(), ActionError> {
+        let mut player_state = &mut self.0[player as usize];
+        player_state.select_tickets(ids)?;
+        trace!(
+            "Player {} selected {:?}",
+            player,
+            player_state.selected.as_deref().unwrap()
+        );
+        Ok(())
+    }
+
+    fn complete(&self) -> bool {
+        self.0.iter().all(|x| x.selected.is_some())
+    }
+}
+
+impl InitialTicketState {
+    fn select_tickets(&mut self, ids: &[u32]) -> Result<(), ActionError> {
+        let selection: Vec<_> = self
+            .options
+            .iter()
+            .filter(|x| ids.contains(&x.id))
+            .copied()
+            .collect();
+        if ids.len() < 2 {
+            // TODO: This may be map-specific
+            return Err(ActionError::NotEnoughTickets(ids.to_vec(), 2));
+        }
+
+        if selection.len() != ids.len() {
+            return Err(ActionError::BadTicketSelection(
+                ids.to_vec(),
+                self.options.clone(),
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -245,6 +299,14 @@ impl FaceUp {
         let result = std::mem::replace(&mut self.0[slot], deck.deal_one(rand));
         self.check_for_rainbow(rand, deck);
         result
+    }
+}
+
+impl Index<u8> for FaceUp {
+    type Output = Train;
+
+    fn index(&self, idx: u8) -> &Self::Output {
+        &self.0[idx as usize]
     }
 }
 
@@ -308,7 +370,7 @@ mod test {
 
             use GameState::*;
             match state {
-                InitialTickets(state) => state[0].clone(),
+                InitialTickets(state) => state.0[0].clone(),
                 _ => panic!("Unexpected state"),
             }
         };
